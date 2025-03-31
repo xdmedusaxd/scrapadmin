@@ -14,7 +14,7 @@ user = Client(
     api_id=config.API_ID, 
     api_hash=config.API_HASH, 
     session_string=config.SESSION_STRING,
-    workers=100,  # Reduced from 1000 to a more reasonable number
+    workers=1000,  # Reduced from 1000 to a more reasonable number
     no_updates=True  # This prevents the SESSION_REVOKED error
 )
 
