@@ -16,7 +16,7 @@ ENV/
 
 # Temporary files
 temp/
-*.txt
+bot_data.json
 
 # OS specific files
 .DS_Store
