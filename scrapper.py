@@ -1,8 +1,8 @@
 import re
 import asyncio
 import json
-from pyrogram import Client, filters, enums
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram import Client, filters
+from pyrogram.types import Message
 from datetime import datetime
 import os
 import config
@@ -12,8 +12,8 @@ bot = Client("bot", api_id=config.API_ID, api_hash=config.API_HASH, bot_token=co
 user = Client("user", api_id=config.API_ID, api_hash=config.API_HASH, session_string=config.SESSION_STRING)
 
 # Create temp directory if not exists
-if not os.path.exists("temp"):
-    os.makedirs("temp")
+if not os.path.exists(config.TEMP_DIR):
+    os.makedirs(config.TEMP_DIR)
 
 # Function to check if user is admin
 def is_admin(user_id):
@@ -23,36 +23,35 @@ def is_admin(user_id):
 def is_approved(user_id):
     return user_id in config.APPROVED_USERS or user_id in config.ADMIN_IDS
 
-# Function to save updated user lists to .env file
-def save_users_to_env():
-    # Read current .env file content
-    with open('.env', 'r') as f:
-        env_lines = f.readlines()
+# Function to save updated user lists to storage
+def save_users_to_storage():
+    """Save users to a data file for persistence on Render"""
+    data = {
+        'ADMIN_IDS': config.ADMIN_IDS,
+        'APPROVED_USERS': config.APPROVED_USERS
+    }
 
-    # Update or add ADMIN_IDS and APPROVED_USERS
-    admin_line_found = False
-    approved_line_found = False
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(config.DATA_FILE), exist_ok=True)
 
-    for i, line in enumerate(env_lines):
-        if line.startswith('ADMIN_IDS='):
-            env_lines[i] = f'ADMIN_IDS={",".join(map(str, config.ADMIN_IDS))}\n'
-            admin_line_found = True
-        elif line.startswith('APPROVED_USERS='):
-            # Convert to JSON string
-            json_str = json.dumps(config.APPROVED_USERS)
-            env_lines[i] = f'APPROVED_USERS={json_str}\n'
-            approved_line_found = True
+    with open(config.DATA_FILE, 'w') as f:
+        json.dump(data, f)
 
-    if not admin_line_found:
-        env_lines.append(f'ADMIN_IDS={",".join(map(str, config.ADMIN_IDS))}\n')
-    if not approved_line_found:
-        # Convert to JSON string
-        json_str = json.dumps(config.APPROVED_USERS)
-        env_lines.append(f'APPROVED_USERS={json_str}\n')
+    print(f"User data saved to {config.DATA_FILE}")
 
-    # Write back to .env file
-    with open('.env', 'w') as f:
-        f.writelines(env_lines)
+# Function to load users from storage
+def load_users_from_storage():
+    """Load users from the data file if it exists"""
+    try:
+        if os.path.exists(config.DATA_FILE):
+            with open(config.DATA_FILE, 'r') as f:
+                data = json.load(f)
+                config.ADMIN_IDS = data.get('ADMIN_IDS', config.ADMIN_IDS)
+                config.APPROVED_USERS = {int(k): v for k, v in data.get('APPROVED_USERS', {}).items()}
+            print(f"User data loaded from {config.DATA_FILE}")
+            print(f"Admins: {len(config.ADMIN_IDS)}, Approved Users: {len(config.APPROVED_USERS)}")
+    except Exception as e:
+        print(f"Error loading user data: {e}")
 
 # Start command
 @bot.on_message(filters.command("start") & filters.private)
@@ -133,7 +132,7 @@ async def add_user_command(client, message):
             await message.reply(f"User {user_to_add} is already approved. Updating name.")
 
         config.APPROVED_USERS[user_to_add] = name
-        save_users_to_env()
+        save_users_to_storage()
         await message.reply(f"User {user_to_add} ({name}) has been approved to use the bot.")
     except (IndexError, ValueError):
         await message.reply("Invalid format. Use `/adduser [user_id] [name]`")
@@ -154,7 +153,7 @@ async def remove_user_command(client, message):
             return
 
         name = config.APPROVED_USERS.pop(user_to_remove)
-        save_users_to_env()
+        save_users_to_storage()
         await message.reply(f"User {user_to_remove} ({name}) has been removed from approved users.")
     except (IndexError, ValueError):
         await message.reply("Invalid format. Use `/removeuser [user_id]`")
@@ -175,7 +174,7 @@ async def add_admin_command(client, message):
             return
 
         config.ADMIN_IDS.append(new_admin)
-        save_users_to_env()
+        save_users_to_storage()
 
         # Get name if the user is in approved users
         name = config.APPROVED_USERS.get(new_admin, "Unknown")
@@ -199,7 +198,7 @@ async def remove_admin_command(client, message):
             return
 
         config.ADMIN_IDS.remove(admin_to_remove)
-        save_users_to_env()
+        save_users_to_storage()
 
         # Get name if the user is in approved users
         name = config.APPROVED_USERS.get(admin_to_remove, "Unknown")
@@ -280,7 +279,7 @@ async def scrape_command(client, message):
             return
 
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_path = f"temp/cards_{now}.txt"
+        file_path = f"{config.TEMP_DIR}/cards_{now}.txt"
         with open(file_path, "w") as f:
             f.write("\n".join(cards))
 
@@ -337,9 +336,13 @@ async def get_cards(channel, amount, prefix=None, status_msg=None):
 
 # Run both clients
 async def main():
+    # Load saved users data
+    load_users_from_storage()
+
     await bot.start()
     await user.start()
-    print("Bot started!")
+    print("Bot started successfully!")
+    print(f"Bot Username: @{(await bot.get_me()).username}")
     await asyncio.Future()  # Keep running
 
 if __name__ == "__main__":
