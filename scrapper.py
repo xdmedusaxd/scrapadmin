@@ -14,7 +14,7 @@ user = Client(
     api_id=config.API_ID, 
     api_hash=config.API_HASH, 
     session_string=config.SESSION_STRING,
-    workers=1000,  # Reduced from 1000 to a more reasonable number
+    workers=1000,  # Keep workers at 1000 as requested
     no_updates=True  # This prevents the SESSION_REVOKED error
 )
 
@@ -280,10 +280,13 @@ async def scrape_command(client, message):
     msg = await message.reply("Scraping in progress...")
     
     try:
-        cards = await get_cards(channel, amount, prefix, msg)
+        cards, total_found, channel_name = await get_cards(channel, amount, prefix, msg)
         if len(cards) == 0:
             await msg.edit("No cards found matching your criteria")
             return
+        
+        # Calculate duplicates removed
+        duplicates = total_found - len(cards)
         
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_path = f"{config.TEMP_DIR}/cards_{now}.txt"
@@ -292,16 +295,22 @@ async def scrape_command(client, message):
         
         await msg.edit("Scraping completed. Sending results...")
         
-        caption = f"📤 **Scraping Results**\n\n" \
-                 f"• **Source:** {channel}\n" \
-                 f"• **Messages Scraped:** {amount}\n" \
-                 f"• **Cards Found:** {len(cards)}\n" \
-                 f"• **Prefix Filter:** {prefix if prefix else 'None'}\n"
+        # Updated caption format
+        caption = (
+            f"<b>✅ Successfully Scraped Cards</b>\n"
+            f"<b>━━━━━━━━━━━━━━━━</b>\n"
+            f"<b>[ϟ] Source :</b> <code>{channel_name}</code>\n"
+            f"<b>[ϟ] Amount :</b> <code>{len(cards)}</code>\n"
+            f"<b>[ϟ] Duplicates :</b> <code>{duplicates}</code>\n"
+            f"<b>━━━━━━━━━━━━━━━━</b>\n"
+            f"<b>[ϟ] Dev :</b> <a href='https://t.me/{config.USERNAME}'>{config.NAME}</a>\n"
+        )
         
         await bot.send_document(
             chat_id=message.chat.id,
             document=file_path,
-            caption=caption
+            caption=caption,
+            parse_mode="html"
         )
         os.remove(file_path)
     except Exception as e:
@@ -315,27 +324,35 @@ async def get_cards(channel, amount, prefix=None, status_msg=None):
     cards = []
     count = 0
     status_update_interval = max(1, min(amount // 10, 50))  # Update status every 10% or 50 messages, whichever is less
+    channel_name = channel
     
     try:
-        # Safer approach with error handling
+        # Try to get channel information
         try:
-            async for message in user.get_chat_history(channel, limit=amount):
-                count += 1
-                
-                if count % status_update_interval == 0:
-                    progress = (count / amount) * 100
-                    await status_msg.edit(f"Scraping: {count}/{amount} messages ({progress:.1f}%)")
-                
-                if message.text:
-                    matches = card_pattern.findall(message.text)
-                    if matches:
-                        for card in matches:
-                            card = card.replace(" ", "")  # Remove spaces
-                            if prefix and not card.startswith(prefix):
-                                continue
-                            cards.append(card)
-        except Exception as e:
-            await status_msg.edit(f"Error during scraping: {str(e)}\nRetrieved {count} messages before error.")
+            chat = await user.get_chat(channel)
+            if chat.title:
+                channel_name = chat.title
+        except:
+            pass
+            
+        async for message in user.get_chat_history(channel, limit=amount):
+            count += 1
+            
+            if count % status_update_interval == 0:
+                progress = (count / amount) * 100
+                await status_msg.edit(f"Scraping: {count}/{amount} messages ({progress:.1f}%)")
+            
+            if message.text:
+                matches = card_pattern.findall(message.text)
+                if matches:
+                    for card in matches:
+                        card = card.replace(" ", "")  # Remove spaces
+                        if prefix and not card.startswith(prefix):
+                            continue
+                        cards.append(card)
+        
+        # Count total cards before removing duplicates
+        total_found = len(cards)
         
         # Remove duplicates while preserving order
         unique_cards = []
@@ -345,33 +362,20 @@ async def get_cards(channel, amount, prefix=None, status_msg=None):
                 unique_cards.append(card)
                 seen.add(card)
         
-        return unique_cards
+        return unique_cards, total_found, channel_name
     except Exception as e:
         raise Exception(f"Failed to scrape: {str(e)}")
 
-# Run both clients with error handling
+# Run both clients
 async def main():
-    try:
-        # Load saved users data
-        load_users_from_storage()
-        
-        # Start the bot client
-        await bot.start()
-        print("Bot started successfully!")
-        
-        try:
-            # Try to start the user client with extra error handling
-            await user.start()
-            print(f"User client started successfully!")
-        except Exception as e:
-            print(f"Failed to start user client: {str(e)}")
-            print("Bot will continue running, but scraping functionality will be limited.")
-        
-        print(f"Bot Username: @{(await bot.get_me()).username}")
-        await asyncio.Future()  # Keep running
-    except Exception as e:
-        print(f"Critical error in main: {str(e)}")
-        raise  # Re-raise the exception to exit with error
+    # Load saved users data
+    load_users_from_storage()
+    
+    await bot.start()
+    await user.start()
+    print("Bot started successfully!")
+    print(f"Bot Username: @{(await bot.get_me()).username}")
+    await asyncio.Future()  # Keep running
 
 if __name__ == "__main__":
     asyncio.run(main())
