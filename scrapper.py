@@ -2,6 +2,7 @@ import re
 import asyncio
 import json
 from pyrogram import Client, filters
+from pyrogram.errors import FloodWait
 from pyrogram.types import Message
 from datetime import datetime
 import os
@@ -14,7 +15,7 @@ user = Client(
     api_id=config.API_ID, 
     api_hash=config.API_HASH, 
     session_string=config.SESSION_STRING,
-    workers=1000,  # Keep workers at 1000 as requested
+    workers=1000,
     no_updates=True  # This prevents the SESSION_REVOKED error
 )
 
@@ -37,13 +38,13 @@ def save_users_to_storage():
         'ADMIN_IDS': config.ADMIN_IDS,
         'APPROVED_USERS': config.APPROVED_USERS
     }
-    
+
     # Ensure directory exists
     os.makedirs(os.path.dirname(config.DATA_FILE), exist_ok=True)
-    
+
     with open(config.DATA_FILE, 'w') as f:
         json.dump(data, f)
-    
+
     print(f"User data saved to {config.DATA_FILE}")
 
 # Function to load users from storage
@@ -67,7 +68,7 @@ async def start_command(client, message):
     if not is_approved(user_id) and not is_admin(user_id):
         await message.reply("You are not authorized to use this bot. Please contact an admin for approval.")
         return
-        
+
     text = """
 Welcome to Card Scrapper Bot 🤖
 Use /scr command to grab cards
@@ -90,7 +91,7 @@ async def help_command(client, message):
     if not is_approved(user_id) and not is_admin(user_id):
         await message.reply("You are not authorized to use this bot. Please contact an admin for approval.")
         return
-        
+
     if is_admin(user_id):
         text = """
 **Admin Commands:**
@@ -124,20 +125,20 @@ async def add_user_command(client, message):
     if not is_admin(user_id):
         await message.reply("You are not authorized to use this command.")
         return
-    
+
     # Extract user ID and name to add
     try:
         parts = message.text.split(" ", 2)
         if len(parts) < 3:
             await message.reply("Invalid format. Use `/adduser [user_id] [name]`")
             return
-            
+
         user_to_add = int(parts[1])
         name = parts[2]
-        
+
         if user_to_add in config.APPROVED_USERS:
             await message.reply(f"User {user_to_add} is already approved. Updating name.")
-        
+
         config.APPROVED_USERS[user_to_add] = name
         save_users_to_storage()
         await message.reply(f"User {user_to_add} ({name}) has been approved to use the bot.")
@@ -151,14 +152,14 @@ async def remove_user_command(client, message):
     if not is_admin(user_id):
         await message.reply("You are not authorized to use this command.")
         return
-    
+
     # Extract user ID to remove
     try:
         user_to_remove = int(message.text.split()[1])
         if user_to_remove not in config.APPROVED_USERS:
             await message.reply(f"User {user_to_remove} is not in the approved list.")
             return
-        
+
         name = config.APPROVED_USERS.pop(user_to_remove)
         save_users_to_storage()
         await message.reply(f"User {user_to_remove} ({name}) has been removed from approved users.")
@@ -172,17 +173,17 @@ async def add_admin_command(client, message):
     if not is_admin(user_id):
         await message.reply("You are not authorized to use this command.")
         return
-    
+
     # Extract user ID to add as admin
     try:
         new_admin = int(message.text.split()[1])
         if new_admin in config.ADMIN_IDS:
             await message.reply(f"User {new_admin} is already an admin.")
             return
-        
+
         config.ADMIN_IDS.append(new_admin)
         save_users_to_storage()
-        
+
         # Get name if the user is in approved users
         name = config.APPROVED_USERS.get(new_admin, "Unknown")
         await message.reply(f"User {new_admin} ({name}) has been promoted to admin.")
@@ -196,17 +197,17 @@ async def remove_admin_command(client, message):
     if not is_admin(user_id):
         await message.reply("You are not authorized to use this command.")
         return
-    
+
     # Extract user ID to remove as admin
     try:
         admin_to_remove = int(message.text.split()[1])
         if admin_to_remove not in config.ADMIN_IDS:
             await message.reply(f"User {admin_to_remove} is not an admin.")
             return
-        
+
         config.ADMIN_IDS.remove(admin_to_remove)
         save_users_to_storage()
-        
+
         # Get name if the user is in approved users
         name = config.APPROVED_USERS.get(admin_to_remove, "Unknown")
         await message.reply(f"User {admin_to_remove} ({name}) has been removed from admins.")
@@ -220,15 +221,15 @@ async def list_users_command(client, message):
     if not is_admin(user_id):
         await message.reply("You are not authorized to use this command.")
         return
-    
+
     if not config.APPROVED_USERS:
         await message.reply("No approved users found.")
         return
-    
+
     users_list = "**Approved Users:**\n"
     for i, (uid, name) in enumerate(config.APPROVED_USERS.items(), 1):
         users_list += f"{i}. {uid} - {name}\n"
-    
+
     await message.reply(users_list)
 
 # List admins command
@@ -238,17 +239,17 @@ async def list_admins_command(client, message):
     if not is_admin(user_id):
         await message.reply("You are not authorized to use this command.")
         return
-    
+
     if not config.ADMIN_IDS:
         await message.reply("No admins found.")
         return
-    
+
     admins_list = "**Admin Users:**\n"
     for i, admin_id in enumerate(config.ADMIN_IDS, 1):
         # Get name if the admin is in approved users
         name = config.APPROVED_USERS.get(admin_id, "Unknown")
         admins_list += f"{i}. {admin_id} - {name}\n"
-    
+
     await message.reply(admins_list)
 
 # Scrape command
@@ -278,23 +279,23 @@ async def scrape_command(client, message):
     prefix = cmd[3] if len(cmd) > 3 else None
 
     msg = await message.reply("Scraping in progress...")
-    
+
     try:
         cards, total_found, channel_name = await get_cards(channel, amount, prefix, msg)
         if len(cards) == 0:
             await msg.edit("No cards found matching your criteria")
             return
-        
+
         # Calculate duplicates removed
         duplicates = total_found - len(cards)
-        
+
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_path = f"{config.TEMP_DIR}/cards_{now}.txt"
         with open(file_path, "w") as f:
             f.write("\n".join(cards))
-        
+
         await msg.edit("Scraping completed. Sending results...")
-        
+
         # Updated caption format
         caption = (
             f"<b>✅ Successfully Scraped Cards</b>\n"
@@ -305,7 +306,7 @@ async def scrape_command(client, message):
             f"<b>━━━━━━━━━━━━━━━━</b>\n"
             f"<b>[ϟ] Dev :</b> <a href='https://t.me/{config.USERNAME}'>{config.NAME}</a>\n"
         )
-        
+
         await bot.send_document(
             chat_id=message.chat.id,
             document=file_path,
@@ -325,7 +326,7 @@ async def get_cards(channel, amount, prefix=None, status_msg=None):
     count = 0
     status_update_interval = max(1, min(amount // 10, 50))  # Update status every 10% or 50 messages, whichever is less
     channel_name = channel
-    
+
     try:
         # Try to get channel information
         try:
@@ -334,14 +335,14 @@ async def get_cards(channel, amount, prefix=None, status_msg=None):
                 channel_name = chat.title
         except:
             pass
-            
+
         async for message in user.get_chat_history(channel, limit=amount):
             count += 1
-            
+
             if count % status_update_interval == 0:
                 progress = (count / amount) * 100
                 await status_msg.edit(f"Scraping: {count}/{amount} messages ({progress:.1f}%)")
-            
+
             if message.text:
                 matches = card_pattern.findall(message.text)
                 if matches:
@@ -350,10 +351,10 @@ async def get_cards(channel, amount, prefix=None, status_msg=None):
                         if prefix and not card.startswith(prefix):
                             continue
                         cards.append(card)
-        
+
         # Count total cards before removing duplicates
         total_found = len(cards)
-        
+
         # Remove duplicates while preserving order
         unique_cards = []
         seen = set()
@@ -361,19 +362,44 @@ async def get_cards(channel, amount, prefix=None, status_msg=None):
             if card not in seen:
                 unique_cards.append(card)
                 seen.add(card)
-        
+
         return unique_cards, total_found, channel_name
     except Exception as e:
         raise Exception(f"Failed to scrape: {str(e)}")
 
-# Run both clients
+# Run both clients with flood wait handling
 async def main():
     # Load saved users data
     load_users_from_storage()
-    
-    await bot.start()
-    await user.start()
-    print("Bot started successfully!")
+
+    # Start the bot client with flood wait handling
+    while True:
+        try:
+            print("Starting bot client...")
+            await bot.start()
+            print("Bot started successfully!")
+            break
+        except FloodWait as e:
+            print(f"FloodWait: waiting for {e.value} seconds before retrying")
+            await asyncio.sleep(e.value + 5)  # Wait for flood wait time + 5 seconds buffer
+        except Exception as e:
+            print(f"Error starting bot client: {str(e)}")
+            await asyncio.sleep(10)  # Wait 10 seconds before retrying
+
+    # Start the user client with flood wait handling
+    while True:
+        try:
+            print("Starting user client...")
+            await user.start()
+            print("User client started successfully!")
+            break
+        except FloodWait as e:
+            print(f"FloodWait: waiting for {e.value} seconds before retrying")
+            await asyncio.sleep(e.value + 5)  # Wait for flood wait time + 5 seconds buffer
+        except Exception as e:
+            print(f"Error starting user client: {str(e)}")
+            await asyncio.sleep(10)  # Wait 10 seconds before retrying
+
     print(f"Bot Username: @{(await bot.get_me()).username}")
     await asyncio.Future()  # Keep running
 
